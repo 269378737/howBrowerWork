@@ -1,6 +1,8 @@
 浏览器的工作原理：新式网络浏览器幕后揭秘
 ===================================
 
+[原文链接https://www.html5rocks.com/zh/tutorials/internals/howbrowserswork/#1_1](https://www.html5rocks.com/zh/tutorials/internals/howbrowserswork/#1_1)
+
 ## 序言
 
 这是一篇全面介绍Webkit和Gecko内部操作的入门文章，是以色列开发人员塔利·加希尔大量研究的成果。在过去的几年中，她查阅了所有公开发布的关于浏览器内部机制的数据（详见[资料](https://www.html5rocks.com/zh/tutorials/internals/howbrowserswork/#Resources)），并花了很多时间来研读网络浏览器的源代码。她写道：
@@ -1267,7 +1269,5 @@ inline 框放置在行中或“行框”中。这些行至少和最高的框一�
 	* Firefox. https://developer.mozilla.org/en/Build_Documentation
 	* WebKit. http://webkit.org/building/build.html
 
-
-[转自](https://www.html5rocks.com/zh/tutorials/internals/howbrowserswork/#1_1)
 
 希望这篇文章可以帮助更多的人理解浏览器的工作原理。(^0^)
