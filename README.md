@@ -486,6 +486,207 @@ Webkit使用了一个堆栈来保存当前的元素内容，它会从外部表�
 
 ## CSS解析
 
+还记得简介中解析的概念吗？和HTML不同，CSS是上下文无关的语法，可以使用简洁中描述的各种解析器进行解析。事实上，css规范定义了css的词法和语法。
+
+让我们来看一些示例：
+
+词法语法（词汇）是针对各个标记用正则表达式定义的：
+
+*	comment   \/\*[^*]*\*+([^/*][^*]*\*+)*\/
+
+*	num   [0-9]+|[0-9]*"."[0-9]+
+
+*	nonascii  [\200-\377]
+
+*	nmstart   [_a-z]|{nonascii}|{escape}
+
+*	nmchar    [_a-z0-9-]|{nonascii}|{escape}
+
+*	name    {nmchar}+
+
+*	ident   {nmstart}{nmchar}*
+
+“ident”是标识符（identifier）的缩写，比如类名。“name”是元素的ID（通过“#”来引用）。
+
+语法是采用BNF格式描述的。
+
+```
+
+	ruleset
+	  : selector [ ',' S* selector ]*
+	    '{' S* declaration [ ';' S* declaration ]* '}' S*
+	  ;
+	selector
+	  : simple_selector [ combinator selector | S+ [ combinator? selector ]? ]?
+	  ;
+	simple_selector
+	  : element_name [ HASH | class | attrib | pseudo ]*
+	  | [ HASH | class | attrib | pseudo ]+
+	  ;
+	class
+	  : '.' IDENT
+	  ;
+	element_name
+	  : IDENT | '*'
+	  ;
+	attrib
+	  : '[' S* IDENT S* [ [ '=' | INCLUDES | DASHMATCH ] S*
+	    [ IDENT | STRING ] S* ] ']'
+	  ;
+	pseudo
+	  : ':' [ IDENT | FUNCTION S* [IDENT S*] ')' ]
+	  ;
+
+```
+
+解释：这是一个规则集的结构：
+
+```css
+
+	div.error , a.error {
+	  color:red;
+	  font-weight:bold;
+	}
+
+```
+
+div.errorhe1a.error是选择器。大括号内的部分包含了由此规则集应用的规则。此结构的正式定义是这样的：
+
+```
+
+	ruleset
+	  : selector [ ',' S* selector ]*
+	    '{' S* declaration [ ';' S* declaration ]* '}' S*
+	  ;
+
+```
+
+这表示一个规则集就是一个选择器，或者由逗号和空格（S表示空格）分割的多个（数量可选）选择器。规则集包含了大括号，以及其中的一个或多个（数量可选）由分号分隔的声明。“声明”和“选择器”将由下面的BNF格式定义。
+
+## WebKit CSS解析器
+
+WebKit使用Flex和Bison解析器生成器，通过css语法文件自动创建解析器。正如我们之前在解析器简洁中所说，Bison会创建自下而上的移位归约解析器。
+
+Firefox使用的是人工编写的自上而下的解析器。这两种解析器都会将CSS文件解析成StyleSheet对象，且每个对象都包含css规则。css规则对象则包含选择器和声明对象，以及其他与css语法对应的对象。
+
+![](img/11.png) 图：解析css
+
+## 处理脚本和样式表的顺序
+
+#### 脚本
+
+网络的模型是同步的。网页作者希望解析器遇到<script>标记时立即解析并执行脚本。文档的解析立即停止，知道脚本执行完毕。如果脚本是外部的，那么解析过程会停止，直到从网络同步抓取资源完成后继续。此模型已经使用多年，也在HTML4和HTML5规范中进行了指定。作者也可以将脚本标注为“defer”，这样它就不会停止文档解析，而是等到解析结束才执行。HTML5增加了一个选项，可将脚本标记为异步，一遍由其他线程解析和执行。
+
+#### 预解析
+
+WebKit和Firefox都进行了这项优化。在执行脚本时，其他线程会解析文档的其余部分，找出并加载需要通过网络加载的其他资源。通过这种方式，资源可以在并行连接上加载，从而提高总体速度。请注意，预解析器不会修改DOM树，而是将这项工作交由解析器处理；预解析器只会解析万部资源（例如外部脚本，样式表和图片）的引用。
+
+#### 样式表
+
+另一方面，样式表有着不同的模型。理论上来说，应用样式表不会更改DOM树，因此似乎没有必要等待样式表并停止文档解析。但这涉及到一个问题，就是脚本在文档解析阶段会请求样式信息。如果当时还没有加载和解析央视，脚本就会会的错误的回复，这样显然会产生很多问题。这看上去是一个非典型案例，但事实上非常普遍。Firefox在样式表加载和解析的过程中，会禁止所有脚本。而对于WebKit而言，仅当脚本尝试访问的样式属性可能受尚未加载的样式表影响，它才会禁止该脚本。
+
+#### 呈现树构建
+
+在DOM树构建的同事，浏览器还会构建另一个树：呈现树。这是由可视化元素按照其显示顺序而组成的树，也是文档的可视化表示。它的作用是您按照正确的顺序绘制内容。
+
+Firefox将呈现树中的元素称为“框架”。WebKit使用的术语是呈现齐或呈现对象。
+
+呈现器知道如何布局并将自身及其子元素绘制出来。
+
+WebKits RenderObject类是所有呈现其的基类，其定义如下：
+
+```
+
+	class RenderObject{
+	  virtual void layout();
+	  virtual void paint(PaintInfo);
+	  virtual void rect repaintRect();
+	  Node* node;  //the DOM node
+	  RenderStyle* style;  // the computed style
+	  RenderLayer* containgLayer; //the containing z-index layer
+	}
+
+```
+
+每一个呈现其都代表了一个矩形的区域，通常对应相关节点的CSS框，这一点在CSS2规范中有所描述。它包含诸如宽度、高度和位置等几何信息。
+
+框的类型会受到与节点相关的“display”样式属性的影响。
+
+下面这段WebKit代码描述了根据display属性的不同，针对同一个DOM节点应创建什么类型的呈现器。
+
+```
+
+	RenderObject* RenderObject::createObject(Node* node, RenderStyle* style)
+	{
+	    Document* doc = node->document();
+	    RenderArena* arena = doc->renderArena();
+	    ...
+	    RenderObject* o = 0;
+	
+	    switch (style->display()) {
+	        case NONE:
+	            break;
+	        case INLINE:
+	            o = new (arena) RenderInline(node);
+	            break;
+	        case BLOCK:
+	            o = new (arena) RenderBlock(node);
+	            break;
+	        case INLINE_BLOCK:
+	            o = new (arena) RenderBlock(node);
+	            break;
+	        case LIST_ITEM:
+	            o = new (arena) RenderListItem(node);
+	            break;
+	       ...
+	    }
+	
+	    return o;
+	}
+
+```
+
+元素类型也是考虑因素之一，例如表单控件和表格都对应特殊的框架。
+
+在WebKit中，如果一个元素需要创建特殊的呈现器，就会替换createRender方法。呈现器所指向的样式对象中包含了一些和几何无关的信息。
+
+## 呈现树和DOM树的关系
+
+呈现器是和DOM元素相对应的，但并非一一对应。非可视化的DOM元素不会插入呈现树中，例如“head”元素。如果元素的display属性值为“none”，那么也不会显示在呈现树种（但visiblity属性值为“hidden”的元素仍会显示）。
+
+有一些DOM元素对应多个可视化对象。他们往往是具有复杂结构的元素，无法用单一的矩形来描述。例如“select”元素有3个呈现器：一个用于显示区域，一个用于下拉列表，还有一个用于按钮。如果由于宽度不够，文本无法在一行显示而分为多行，那么新的行为也会作为新的呈现器添加。
+
+另一个关于多呈现器的例子是格式无效的HTML。根据CSS规范，inline元素只能包含block元素或inline元素中的一种。如果出现了混合内容，则应创建匿名的block呈现器，以包裹inline元素。
+
+有一些呈现对象对应于DOM节点，但在树中所在的位置与DOM节点不同。浮动定位和绝对定位就是这样，他们处于正常的流程之外。放置在树中的其他地方，并映射到真正的框架，而放在原位的是占位框架。
+
+
+![](img/12.png) 图：呈现树及其对应的DOM树。初始容器block为“viewport”，而在WebKit中则为“RenderView”对象
+
+## 构建呈现树的流程
+
+在Firefox中，系统会针对DOM更新注册展示层，作为侦听器。展示层将框架创建工作委托给FrameConstructor，由该构造器解析样式并创建框架。
+
+在WebKit中，解析样式和创建呈现器的过程称为“附加”。每个DOM节点都有一个“attach”方法。附加是同步进行的，将节点插入DOM树需要调用新的节点“attach”方法。
+
+处理html和body标记就会创建呈现树根节点。这个根节点呈现对象对应于css规范中所说的容器block，这是最上层的block，包含了其他所有block。它的尺寸就是视口，即浏览器窗口显示区域的尺寸。Firefox称之为ViewPortFrame，而WebKit称之为RenderView。这就是文档所指向的呈现对象。呈现树的奇遇部分以DOM树节点插入的形式来构建。
+
+请参阅[关于处理模型的CSS2规范](https://www.w3.org/TR/CSS21/intro.html#processing-model)
+
+## 样式计算
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
